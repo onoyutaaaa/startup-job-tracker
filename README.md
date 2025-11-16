@@ -1,10 +1,24 @@
 # スタートアップ求人トラッカー
 
-LayerX、SmartHR、HERPの求人情報を自動収集・表示するWebアプリケーションです。
+注目のスタートアップ11社の求人情報を自動収集・表示するWebアプリケーションです。
+
+## 対象企業
+
+- **LayerX** - AI SaaS企業
+- **SmartHR** - 労務管理SaaS
+- **HERP** - 採用管理SaaS
+- **10X** - 小売業DX
+- **Nstock** - ストックオプション SaaS
+- **Stract** - ショッピングアシストアプリ
+- **SecureNavi** - 情報セキュリティSaaS
+- **Nealle** - モビリティSaaS
+- **Shippio** - 国際物流DX
+- **hacomono** - フィットネス施設管理SaaS
+- **IVRy** - 電話自動応答サービス
 
 ## 主な機能
 
-- **自動クローリング**: 3社の採用ページから求人情報を自動収集
+- **自動クローリング**: 11社の採用ページから求人情報を自動収集
 - **毎日自動更新**: 毎日12時に自動的に求人情報を更新
 - **検索機能**: 社名・職種名で求人を検索
 - **フィルター機能**: 年収範囲で求人を絞り込み
@@ -156,32 +170,59 @@ POST /api/scrape
 
 ## カスタマイズ
 
-### クローリング対象の追加
+### HERP Careers プラットフォームの会社を追加
 
-`app/scraper.py` に新しいScraperクラスを追加:
+HERP Careersを使用している企業を追加する場合は、`app/scraper.py` の `scrape_all_jobs()` 関数内の `herp_companies` リストに追加:
+
+```python
+herp_companies = [
+    ('HERP', 'herpinc'),
+    ('Nstock', 'nstock'),
+    ('Stract', 'stract'),
+    ('SecureNavi', 'securenavi'),
+    ('IVRy', 'ivry'),
+    ('NewCompany', 'newcompany-slug'),  # 追加
+]
+```
+
+### カスタムサイトのクローリング対象を追加
+
+独自の採用サイトを持つ企業の場合は、`app/scraper.py` に新しいScraperクラスを追加:
 
 ```python
 class NewCompanyScraper(JobScraper):
     def __init__(self):
         super().__init__()
+        self.base_url = "https://example.com"
         self.careers_url = "https://example.com/careers"
 
     def scrape(self) -> List[Dict]:
-        # クローリングロジックを実装
-        pass
+        jobs = []
+        try:
+            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # 求人リンクを抽出
+            job_links = soup.find_all('a', href=re.compile(r'/(job|career)', re.I))
+
+            for link in job_links[:30]:
+                # 求人情報を抽出
+                # ...
+        except Exception as e:
+            logger.error(f"Error scraping NewCompany: {e}")
+
+        return jobs
 ```
 
-そして `scrape_all_jobs()` 関数に追加:
+そして `scrape_all_jobs()` 関数の `custom_scrapers` リストに追加:
 
 ```python
-def scrape_all_jobs() -> List[Dict]:
-    scrapers = [
-        LayerXScraper(),
-        SmartHRScraper(),
-        HERPScraper(),
-        NewCompanyScraper()  # 追加
-    ]
+custom_scrapers = [
+    LayerXScraper(),
+    SmartHRScraper(),
     # ...
+    NewCompanyScraper(),  # 追加
+]
 ```
 
 ### スケジュール変更

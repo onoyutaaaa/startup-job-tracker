@@ -282,6 +282,38 @@ header h1 {
     background: #e74c3c;
 }
 
+.company-10x {
+    background: #3498db;
+}
+
+.company-nstock {
+    background: #9b59b6;
+}
+
+.company-stract {
+    background: #f39c12;
+}
+
+.company-securenavi {
+    background: #1abc9c;
+}
+
+.company-nealle {
+    background: #e67e22;
+}
+
+.company-shippio {
+    background: #2ecc71;
+}
+
+.company-hacomono {
+    background: #34495e;
+}
+
+.company-ivry {
+    background: #e91e63;
+}
+
 .job-title {
     font-size: 1.3em;
     font-weight: 600;
