@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スタートアップ求人トラッカー</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>スタートアップ求人トラッカー</h1>
+            <p class="subtitle">LayerX、SmartHR、HERPの求人情報を一括検索</p>
+        </header>
+
+        <!-- Statistics -->
+        <div class="stats-container" id="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="total-jobs">-</div>
+                <div class="stat-label">アクティブ求人</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="new-today">-</div>
+                <div class="stat-label">今日の新着</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="high-salary">-</div>
+                <div class="stat-label">1000万円以上</div>
+            </div>
+        </div>
+
+        <!-- Search and Filters -->
+        <div class="search-section">
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="社名・職種名で検索...">
+                <button onclick="searchJobs()" class="btn btn-primary">検索</button>
+                <button onclick="clearFilters()" class="btn btn-secondary">クリア</button>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>会社:</label>
+                    <select id="company-filter">
+                        <option value="">すべて</option>
+                        <option value="LayerX">LayerX</option>
+                        <option value="SmartHR">SmartHR</option>
+                        <option value="HERP">HERP</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>最低年収:</label>
+                    <select id="salary-min">
+                        <option value="">指定なし</option>
+                        <option value="4000000">400万円〜</option>
+                        <option value="5000000">500万円〜</option>
+                        <option value="6000000">600万円〜</option>
+                        <option value="7000000">700万円〜</option>
+                        <option value="8000000">800万円〜</option>
+                        <option value="10000000">1000万円〜</option>
+                        <option value="12000000">1200万円〜</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>最高年収:</label>
+                    <select id="salary-max">
+                        <option value="">指定なし</option>
+                        <option value="6000000">〜600万円</option>
+                        <option value="8000000">〜800万円</option>
+                        <option value="10000000">〜1000万円</option>
+                        <option value="12000000">〜1200万円</option>
+                        <option value="15000000">〜1500万円</option>
+                        <option value="20000000">〜2000万円</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button onclick="loadNewToday()" class="btn btn-info">今日の新着</button>
+                <button onclick="loadClosedYesterday()" class="btn btn-warning">昨日のクローズ</button>
+                <button onclick="loadHighSalary()" class="btn btn-success">年収1000万円以上</button>
+                <button onclick="triggerScrape()" class="btn btn-action">今すぐ更新</button>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>読み込み中...</p>
+        </div>
+
+        <!-- Results -->
+        <div class="results-section">
+            <div class="results-header">
+                <h2 id="results-title">全求人</h2>
+                <span id="results-count" class="count-badge">0件</span>
+            </div>
+            <div id="jobs-container" class="jobs-grid">
+                <!-- Jobs will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
