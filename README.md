@@ -253,10 +253,41 @@ scheduler.add_job(
 
 #### 推奨される代替アプローチ
 
-**1. 手動データ入力（最も確実）**
+**1. 手動データ入力（最も確実）** ⭐推奨
 - 管理画面で求人URLを手動で追加
 - データの品質をコントロール可能
 - 法的リスクなし
+- すぐに実装可能
+
+手動データ入力の実装例：
+```python
+# app/main.py に以下を追加
+from pydantic import BaseModel
+
+class JobCreate(BaseModel):
+    company: str
+    title: str
+    url: str
+    description: Optional[str] = None
+    salary_min: Optional[float] = None
+    salary_max: Optional[float] = None
+    location: Optional[str] = None
+    employment_type: Optional[str] = None
+
+@app.post("/api/jobs/manual")
+async def add_manual_job(job_data: JobCreate, db: Session = Depends(get_db)):
+    """手動で求人を追加"""
+    new_job = Job(
+        **job_data.dict(),
+        first_seen=datetime.now(),
+        last_seen=datetime.now(),
+        is_active=True
+    )
+    db.add(new_job)
+    db.commit()
+    db.refresh(new_job)
+    return job_to_dict(new_job)
+```
 
 **2. 公式APIの使用**
 - 各社が提供する公式求人API（利用可能な場合）

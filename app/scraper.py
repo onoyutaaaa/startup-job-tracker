@@ -494,6 +494,101 @@ class HacomonoScraper(TalentioScraper):
         super().__init__('hacomono', 'hacomono')
 
 
+class WantedlyScraper(JobScraper):
+    """Generic scraper for Wantedly platform"""
+
+    def __init__(self, company_name: str, company_slug: str):
+        super().__init__()
+        self.company_name = company_name
+        self.company_slug = company_slug
+        self.base_urls = [
+            "https://sg.wantedly.com",      # Try Singapore version first (less restrictions)
+            "https://www.wantedly.com",     # Then main site
+            "https://en-jp.wantedly.com",   # English-Japanese version
+        ]
+
+    def scrape(self) -> List[Dict]:
+        """Scrape job postings from Wantedly"""
+        jobs = []
+
+        # Try different Wantedly domains
+        for base_url in self.base_urls:
+            try:
+                projects_url = f"{base_url}/companies/{self.company_slug}/projects"
+                logger.info(f"Scraping {self.company_name} from Wantedly: {projects_url}")
+
+                soup = self.get_page(projects_url)
+                if not soup:
+                    continue  # Try next domain
+
+                # Find job cards/links on Wantedly
+                # Wantedly uses project links like /projects/{id}
+                job_links = soup.find_all('a', href=re.compile(r'/projects/\d+'))
+
+                for link in job_links[:30]:
+                    try:
+                        url = link.get('href', '')
+                        if url and not url.startswith('http'):
+                            url = base_url + url
+
+                        # Extract title from link or nearby heading
+                        title = link.get_text(strip=True)
+
+                        # Try to find better title from heading
+                        heading = link.find(['h1', 'h2', 'h3', 'h4'])
+                        if heading:
+                            title = heading.get_text(strip=True)
+
+                        if not title or len(title) < 3:
+                            continue
+
+                        # Get parent container for more context
+                        parent = link.find_parent(['div', 'article', 'section', 'li'])
+                        description = parent.get_text(strip=True)[:500] if parent else title
+
+                        # Extract salary (Wantedly often doesn't show specific salary)
+                        salary_min, salary_max = self.extract_salary(description)
+
+                        # Extract location if available
+                        location = None
+                        if parent:
+                            location_elem = parent.find(class_=re.compile(r'location|place|address', re.I))
+                            if location_elem:
+                                location = location_elem.get_text(strip=True)
+
+                        if title and url and '/projects/' in url:
+                            jobs.append({
+                                'company': self.company_name,
+                                'title': title,
+                                'url': url,
+                                'description': description,
+                                'salary_min': salary_min,
+                                'salary_max': salary_max,
+                                'location': location,
+                                'employment_type': None
+                            })
+                    except Exception as e:
+                        logger.debug(f"Error parsing {self.company_name} Wantedly job: {e}")
+                        continue
+
+                # Remove duplicates
+                unique_jobs = {job['url']: job for job in jobs}.values()
+                jobs = list(unique_jobs)
+
+                if jobs:
+                    logger.info(f"Found {len(jobs)} jobs from {self.company_name} (Wantedly via {base_url})")
+                    break  # Success, no need to try other domains
+
+            except Exception as e:
+                logger.debug(f"Error scraping {self.company_name} from {base_url}: {e}")
+                continue  # Try next domain
+
+        if not jobs:
+            logger.warning(f"Could not scrape jobs from {self.company_name} on Wantedly (all domains failed)")
+
+        return jobs
+
+
 def scrape_all_jobs() -> List[Dict]:
     """Scrape jobs from all companies"""
     all_jobs = []
@@ -507,6 +602,17 @@ def scrape_all_jobs() -> List[Dict]:
         ('IVRy', 'ivry'),
     ]
 
+    # Companies on Wantedly platform
+    wantedly_companies = [
+        ('LayerX', 'layerx'),
+        ('SmartHR', 'smarthr'),
+        ('HERP', 'herp'),
+        ('10X', '10x'),
+        ('Stract', 'stract'),
+        ('Shippio', 'shippioinc'),
+        ('hacomono', 'hacomono'),
+    ]
+
     # Custom scrapers (including Talentio-based ones)
     custom_scrapers = [
         LayerXScraper(),        # Uses Talentio
@@ -516,6 +622,16 @@ def scrape_all_jobs() -> List[Dict]:
         ShippioScraper(),       # Custom site
         HacomonoScraper(),      # Uses Talentio
     ]
+
+    # Scrape from Wantedly (most reliable platform)
+    for company_name, company_slug in wantedly_companies:
+        try:
+            scraper = WantedlyScraper(company_name, company_slug)
+            jobs = scraper.scrape()
+            all_jobs.extend(jobs)
+            time.sleep(2)  # Be polite to the server
+        except Exception as e:
+            logger.error(f"Error with Wantedly scraper for {company_name}: {e}")
 
     # Scrape from HERP Careers companies
     for company_name, company_slug in herp_companies:

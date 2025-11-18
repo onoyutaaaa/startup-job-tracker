@@ -35,7 +35,17 @@
 **影響を受けるサイト:**
 - Talentio platform (LayerX, 10X, hacomono)
 - HERP Careers (HERP, Nstock, Stract, SecureNavi, IVRy)
+- Wantedly (すべてのドメイン: sg, www, en-jp)
 - SmartHR, Nealle, Shippio 等
+
+### テスト結果サマリー
+
+| プラットフォーム | 対象企業 | 結果 | 備考 |
+|---------|---------|------|------|
+| Talentio | LayerX, 10X, hacomono | ❌ 403 Forbidden | API, HTML両方ブロック |
+| HERP Careers | HERP, Nstock, Stract, SecureNavi, IVRy | ❌ 403 Forbidden | 全ページブロック |
+| Wantedly | LayerX, SmartHR, HERP 他 | ❌ 403 Forbidden | 全ドメイン試行済 |
+| 独自サイト | SmartHR, Nealle, Shippio | ❌ 403 Forbidden | 個別サイトもブロック |
 
 ## 実用的な代替アプローチ
 
