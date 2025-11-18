@@ -6,6 +6,8 @@ import re
 import logging
 from datetime import datetime
 import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,8 +17,31 @@ class JobScraper:
     """Base class for job scraping"""
 
     def __init__(self):
+        self.session = requests.Session()
+
+        # Configure retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+        # Enhanced headers to mimic real browser
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0',
         }
 
     def extract_salary(self, text: str) -> tuple[Optional[float], Optional[float]]:
@@ -26,11 +51,11 @@ class JobScraper:
 
         # Pattern: 500万円〜1000万円, 500-1000万円, etc.
         patterns = [
-            r'(\d+)(?:万円?)?[〜～~\-](\d+)(?:万円?)?',
             r'(\d{3,4})万円[〜～~\-](\d{3,4})万円',
-            r'年収\s*(\d+)万円?[〜～~\-](\d+)万円?',
-            r'(\d+)万円以上',
-            r'年収(\d+)万円',
+            r'年収\s*(\d{3,4})万円?[〜～~\-](\d{3,4})万円?',
+            r'(\d+)(?:万円?)?[〜～~\-](\d+)(?:万円?)?',
+            r'(\d{3,4})万円以上',
+            r'年収(\d{3,4})万円',
             r'(\d{3,4})万',
         ]
 
@@ -44,6 +69,135 @@ class JobScraper:
                     return salary, None
 
         return None, None
+
+    def get_page(self, url: str, timeout: int = 15) -> Optional[BeautifulSoup]:
+        """Fetch and parse a webpage"""
+        try:
+            response = self.session.get(url, headers=self.headers, timeout=timeout)
+            response.raise_for_status()
+            return BeautifulSoup(response.content, 'html.parser')
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                logger.warning(f"403 Forbidden for {url}. Trying with different headers...")
+                # Try with minimal headers
+                try:
+                    simple_headers = {'User-Agent': 'Mozilla/5.0'}
+                    response = self.session.get(url, headers=simple_headers, timeout=timeout)
+                    response.raise_for_status()
+                    return BeautifulSoup(response.content, 'html.parser')
+                except:
+                    pass
+            logger.error(f"HTTP Error for {url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching {url}: {e}")
+            return None
+
+
+class TalentioScraper(JobScraper):
+    """Generic scraper for Talentio platform"""
+
+    def __init__(self, company_name: str, company_slug: str):
+        super().__init__()
+        self.company_name = company_name
+        self.company_slug = company_slug
+        self.base_url = "https://open.talentio.com"
+        self.api_url = f"https://open.talentio.com/api/v1/public/careers/{company_slug}/jobs"
+
+    def scrape(self) -> List[Dict]:
+        """Scrape job postings from Talentio"""
+        jobs = []
+        try:
+            logger.info(f"Scraping {self.company_name} via Talentio API")
+
+            # Try API first
+            response = self.session.get(self.api_url, headers=self.headers, timeout=15)
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    job_list = data.get('jobs', []) if isinstance(data, dict) else data
+
+                    for job_data in job_list:
+                        try:
+                            job_id = job_data.get('id') or job_data.get('job_id')
+                            title = job_data.get('title') or job_data.get('name', '')
+
+                            url = f"{self.base_url}/r/1/c/{self.company_slug}/jobs/{job_id}"
+
+                            description = job_data.get('description', '')[:500]
+                            location = job_data.get('location') or job_data.get('workplace')
+
+                            # Extract salary from description or dedicated field
+                            salary_text = job_data.get('salary', '') or description
+                            salary_min, salary_max = self.extract_salary(salary_text)
+
+                            if title:
+                                jobs.append({
+                                    'company': self.company_name,
+                                    'title': title,
+                                    'url': url,
+                                    'description': description,
+                                    'salary_min': salary_min,
+                                    'salary_max': salary_max,
+                                    'location': location,
+                                    'employment_type': job_data.get('employment_type')
+                                })
+                        except Exception as e:
+                            logger.debug(f"Error parsing {self.company_name} job: {e}")
+                            continue
+
+                    logger.info(f"Found {len(jobs)} jobs from {self.company_name} (Talentio API)")
+                    return jobs
+                except Exception as e:
+                    logger.warning(f"Failed to parse Talentio API response: {e}")
+
+            # Fallback to HTML scraping
+            careers_url = f"{self.base_url}/r/1/c/{self.company_slug}/homes/1"
+            soup = self.get_page(careers_url)
+
+            if soup:
+                job_links = soup.find_all('a', href=re.compile(r'/jobs/\d+'))
+
+                for link in job_links[:30]:
+                    try:
+                        url = link.get('href', '')
+                        if url and not url.startswith('http'):
+                            url = self.base_url + url
+
+                        title = link.get_text(strip=True)
+
+                        if not title or len(title) < 3:
+                            continue
+
+                        parent = link.find_parent(['div', 'article', 'section'])
+                        description = parent.get_text(strip=True)[:500] if parent else title
+
+                        salary_min, salary_max = self.extract_salary(description)
+
+                        if title and url:
+                            jobs.append({
+                                'company': self.company_name,
+                                'title': title,
+                                'url': url,
+                                'description': description,
+                                'salary_min': salary_min,
+                                'salary_max': salary_max,
+                                'location': None,
+                                'employment_type': None
+                            })
+                    except Exception as e:
+                        logger.debug(f"Error parsing {self.company_name} job: {e}")
+                        continue
+
+                unique_jobs = {job['url']: job for job in jobs}.values()
+                jobs = list(unique_jobs)
+
+            logger.info(f"Found {len(jobs)} jobs from {self.company_name}")
+        except Exception as e:
+            logger.error(f"Error scraping {self.company_name}: {e}")
+
+        return jobs
 
 
 class HERPCareersScraper(JobScraper):
@@ -61,13 +215,12 @@ class HERPCareersScraper(JobScraper):
         jobs = []
         try:
             logger.info(f"Scraping {self.company_name}: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = self.get_page(self.careers_url)
+            if not soup:
+                return jobs
 
-            # Find job cards - HERP Careers typically uses specific patterns
-            # Try multiple selectors to find job listings
+            # Find job cards
             job_containers = (
                 soup.find_all('a', href=re.compile(r'/v1/' + self.company_slug + r'/[a-zA-Z0-9]+')) or
                 soup.find_all('div', class_=re.compile(r'job|position|card', re.I))
@@ -132,67 +285,11 @@ class HERPCareersScraper(JobScraper):
         return jobs
 
 
-class LayerXScraper(JobScraper):
-    """Scraper for LayerX career page"""
+class LayerXScraper(TalentioScraper):
+    """Scraper for LayerX career page (uses Talentio)"""
 
     def __init__(self):
-        super().__init__()
-        self.base_url = "https://jobs.layerx.co.jp"
-        self.careers_url = "https://jobs.layerx.co.jp/"
-
-    def scrape(self) -> List[Dict]:
-        """Scrape LayerX job postings"""
-        jobs = []
-        try:
-            logger.info(f"Scraping LayerX: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Look for job links
-            job_links = soup.find_all('a', href=re.compile(r'/(position|job|career)', re.I))
-
-            for link in job_links[:30]:
-                try:
-                    url = link.get('href', '')
-                    if url and not url.startswith('http'):
-                        url = self.base_url + url
-
-                    title = link.get_text(strip=True)
-
-                    if not title or len(title) < 3:
-                        continue
-
-                    parent = link.find_parent(['div', 'article', 'section'])
-                    description = parent.get_text(strip=True)[:500] if parent else title
-
-                    salary_min, salary_max = self.extract_salary(description)
-
-                    if title and url:
-                        jobs.append({
-                            'company': 'LayerX',
-                            'title': title,
-                            'url': url,
-                            'description': description,
-                            'salary_min': salary_min,
-                            'salary_max': salary_max,
-                            'location': None,
-                            'employment_type': None
-                        })
-                except Exception as e:
-                    logger.debug(f"Error parsing LayerX job: {e}")
-                    continue
-
-            # Remove duplicates
-            unique_jobs = {job['url']: job for job in jobs}.values()
-            jobs = list(unique_jobs)
-
-            logger.info(f"Found {len(jobs)} jobs from LayerX")
-        except Exception as e:
-            logger.error(f"Error scraping LayerX: {e}")
-
-        return jobs
+        super().__init__('LayerX', 'layerx')
 
 
 class SmartHRScraper(JobScraper):
@@ -208,10 +305,10 @@ class SmartHRScraper(JobScraper):
         jobs = []
         try:
             logger.info(f"Scraping SmartHR: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = self.get_page(self.careers_url)
+            if not soup:
+                return jobs
 
             # Look for job-related links
             job_links = (
@@ -261,65 +358,11 @@ class SmartHRScraper(JobScraper):
         return jobs
 
 
-class TenXScraper(JobScraper):
-    """Scraper for 10X career page"""
+class TenXScraper(TalentioScraper):
+    """Scraper for 10X career page (uses Talentio)"""
 
     def __init__(self):
-        super().__init__()
-        self.base_url = "https://10x.co.jp"
-        self.careers_url = "https://10x.co.jp/recruit/"
-
-    def scrape(self) -> List[Dict]:
-        """Scrape 10X job postings"""
-        jobs = []
-        try:
-            logger.info(f"Scraping 10X: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            job_links = soup.find_all('a', href=re.compile(r'/(recruit|position|job|career)', re.I))
-
-            for link in job_links[:30]:
-                try:
-                    url = link.get('href', '')
-                    if url and not url.startswith('http'):
-                        url = self.base_url + url
-
-                    title = link.get_text(strip=True)
-
-                    if not title or len(title) < 3:
-                        continue
-
-                    parent = link.find_parent(['div', 'article', 'section'])
-                    description = parent.get_text(strip=True)[:500] if parent else title
-
-                    salary_min, salary_max = self.extract_salary(description)
-
-                    if title and url:
-                        jobs.append({
-                            'company': '10X',
-                            'title': title,
-                            'url': url,
-                            'description': description,
-                            'salary_min': salary_min,
-                            'salary_max': salary_max,
-                            'location': None,
-                            'employment_type': None
-                        })
-                except Exception as e:
-                    logger.debug(f"Error parsing 10X job: {e}")
-                    continue
-
-            unique_jobs = {job['url']: job for job in jobs}.values()
-            jobs = list(unique_jobs)
-
-            logger.info(f"Found {len(jobs)} jobs from 10X")
-        except Exception as e:
-            logger.error(f"Error scraping 10X: {e}")
-
-        return jobs
+        super().__init__('10X', '10x')
 
 
 class NealleScraper(JobScraper):
@@ -335,10 +378,10 @@ class NealleScraper(JobScraper):
         jobs = []
         try:
             logger.info(f"Scraping Nealle: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = self.get_page(self.careers_url)
+            if not soup:
+                return jobs
 
             job_links = soup.find_all('a', href=re.compile(r'/(job|position|career)', re.I))
 
@@ -396,10 +439,10 @@ class ShippioScraper(JobScraper):
         jobs = []
         try:
             logger.info(f"Scraping Shippio: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = self.get_page(self.careers_url)
+            if not soup:
+                return jobs
 
             job_links = soup.find_all('a', href=re.compile(r'/(job|position|career|recruit)', re.I))
 
@@ -444,65 +487,11 @@ class ShippioScraper(JobScraper):
         return jobs
 
 
-class HacomonoScraper(JobScraper):
-    """Scraper for hacomono career page"""
+class HacomonoScraper(TalentioScraper):
+    """Scraper for hacomono career page (uses Talentio)"""
 
     def __init__(self):
-        super().__init__()
-        self.base_url = "https://www.hacomono.co.jp"
-        self.careers_url = "https://www.hacomono.co.jp/recruit/"
-
-    def scrape(self) -> List[Dict]:
-        """Scrape hacomono job postings"""
-        jobs = []
-        try:
-            logger.info(f"Scraping hacomono: {self.careers_url}")
-            response = requests.get(self.careers_url, headers=self.headers, timeout=15)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            job_links = soup.find_all('a', href=re.compile(r'/(recruit|position|job|career)', re.I))
-
-            for link in job_links[:30]:
-                try:
-                    url = link.get('href', '')
-                    if url and not url.startswith('http'):
-                        url = self.base_url + url
-
-                    title = link.get_text(strip=True)
-
-                    if not title or len(title) < 3:
-                        continue
-
-                    parent = link.find_parent(['div', 'article', 'section'])
-                    description = parent.get_text(strip=True)[:500] if parent else title
-
-                    salary_min, salary_max = self.extract_salary(description)
-
-                    if title and url:
-                        jobs.append({
-                            'company': 'hacomono',
-                            'title': title,
-                            'url': url,
-                            'description': description,
-                            'salary_min': salary_min,
-                            'salary_max': salary_max,
-                            'location': None,
-                            'employment_type': None
-                        })
-                except Exception as e:
-                    logger.debug(f"Error parsing hacomono job: {e}")
-                    continue
-
-            unique_jobs = {job['url']: job for job in jobs}.values()
-            jobs = list(unique_jobs)
-
-            logger.info(f"Found {len(jobs)} jobs from hacomono")
-        except Exception as e:
-            logger.error(f"Error scraping hacomono: {e}")
-
-        return jobs
+        super().__init__('hacomono', 'hacomono')
 
 
 def scrape_all_jobs() -> List[Dict]:
@@ -518,14 +507,14 @@ def scrape_all_jobs() -> List[Dict]:
         ('IVRy', 'ivry'),
     ]
 
-    # Custom scrapers
+    # Custom scrapers (including Talentio-based ones)
     custom_scrapers = [
-        LayerXScraper(),
-        SmartHRScraper(),
-        TenXScraper(),
-        NealleScraper(),
-        ShippioScraper(),
-        HacomonoScraper(),
+        LayerXScraper(),        # Uses Talentio
+        SmartHRScraper(),       # Custom site
+        TenXScraper(),          # Uses Talentio
+        NealleScraper(),        # Custom site
+        ShippioScraper(),       # Custom site
+        HacomonoScraper(),      # Uses Talentio
     ]
 
     # Scrape from HERP Careers companies
@@ -534,7 +523,7 @@ def scrape_all_jobs() -> List[Dict]:
             scraper = HERPCareersScraper(company_name, company_slug)
             jobs = scraper.scrape()
             all_jobs.extend(jobs)
-            time.sleep(1)  # Be polite to the server
+            time.sleep(2)  # Be polite to the server
         except Exception as e:
             logger.error(f"Error with HERP Careers scraper for {company_name}: {e}")
 
@@ -543,7 +532,7 @@ def scrape_all_jobs() -> List[Dict]:
         try:
             jobs = scraper.scrape()
             all_jobs.extend(jobs)
-            time.sleep(1)  # Be polite to the server
+            time.sleep(2)  # Be polite to the server
         except Exception as e:
             logger.error(f"Error with scraper {scraper.__class__.__name__}: {e}")
 

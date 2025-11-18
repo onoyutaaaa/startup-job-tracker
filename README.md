@@ -240,6 +240,46 @@ scheduler.add_job(
 
 ## 注意事項
 
+### Webスクレイピングの課題
+
+**重要**: 現在のWebスクレイピング機能は、ほとんどの採用サイトのbot対策により動作が制限されています。
+
+詳細は [SCRAPING_NOTES.md](./SCRAPING_NOTES.md) を参照してください。
+
+#### 現在の状況
+- ほとんどのサイトで403 Forbiddenエラーが発生
+- Talentio、HERP Careersなどのプラットフォームは強力なbot対策を実装
+- 通常のHTTPリクエストではアクセスがブロックされる
+
+#### 推奨される代替アプローチ
+
+**1. 手動データ入力（最も確実）**
+- 管理画面で求人URLを手動で追加
+- データの品質をコントロール可能
+- 法的リスクなし
+
+**2. 公式APIの使用**
+- 各社が提供する公式求人API（利用可能な場合）
+- 最も安全で確実な方法
+
+**3. Selenium + ChromeDriver（上級者向け）**
+- 完全なブラウザエミュレーション
+- ChromeDriverのインストールが必要
+- リソース消費が大きい
+
+```bash
+# ChromeDriverのインストール（Ubuntu/Debian）
+apt-get install chromium-browser chromium-chromedriver
+
+# Seleniumスクレイパーの使用
+python app/selenium_scraper.py
+```
+
+**4. 求人プラットフォームの使用**
+- Wantedly、Green、Findyなどのプラットフォーム
+- より寛容なbot対策
+- 統一されたデータ構造
+
 ### クローリングについて
 
 - 各企業の採用ページの構造は変更される可能性があります
